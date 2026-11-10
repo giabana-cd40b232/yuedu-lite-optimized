@@ -1,0 +1,184 @@
+name: Build iPhone 4S IPA (Linux)
+
+# 在 ubuntu runner 上用 clang + ld64.lld 交叉编译 armv7，
+# 读取 theos/sdks 的 iPhoneOS9.3.sdk，输出未签名 IPA。
+# 适用于 macOS runner 不可用的账号。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios-linux.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SDK: ${{ github.workspace }}/sdk/iPhoneOS9.3.sdk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld zip curl python3
+          clang --version
+          ld64.lld --version
+
+      - name: Download iPhoneOS9.3 SDK (armv7)
+        run: |
+          mkdir -p sdk
+          git clone --filter=blob:none --no-checkout --depth 1 \
+            https://github.com/theos/sdks.git sdk/repo
+          cd sdk/repo
+          git sparse-checkout init --cone
+          git sparse-checkout set iPhoneOS9.3.sdk
+          git checkout
+          mv iPhoneOS9.3.sdk ../iPhoneOS9.3.sdk
+          cd ..
+          rm -rf repo
+          ls -1 "$SDK" | head
+
+      - name: Patch SDK stubs for modern clang/ld
+        run: |
+          python3 - <<'PY'
+          import os, re, shutil
+
+          sdk = os.environ["SDK"]
+
+          # 私有 JavaScriptCore.framework 只有 .tbd 没有 Headers，会挡住公共框架头文件
+          jsc = os.path.join(sdk, "System/Library/PrivateFrameworks/JavaScriptCore.framework")
+          if os.path.isdir(jsc):
+              shutil.rmtree(jsc)
+              print("removed private JavaScriptCore.framework")
+
+          # 新版 ld 用 archs 推断平台，i386/x86_64 会被当成模拟器库
+          patched = 0
+          arch_re = re.compile(r"^archs:\s*\[([^\]]*)\]", re.M)
+
+          def fix_archs(m):
+              archs = [a.strip() for a in m.group(1).split(",") if a.strip()]
+              keep = [a for a in archs if a not in ("i386", "x86_64")]
+              return "archs:                 [ " + ", ".join(keep) + " ]"
+
+          for dirpath, _, files in os.walk(sdk):
+              for name in files:
+                  if not (name.endswith(".tbd") or name.endswith(".dylib")):
+                      continue
+                  path = os.path.join(dirpath, name)
+                  try:
+                      with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                          text = f.read()
+                  except OSError:
+                      continue
+                  if not text.startswith("---"):
+                      continue
+                  new = text.replace("/usr/lib/system/liblaunch.dylib, ", "")
+                  new = arch_re.sub(fix_archs, new, count=1)
+                  if new != text:
+                      with open(path, "w", encoding="utf-8") as f:
+                          f.write(new)
+                      patched += 1
+
+          print("patched %d stub files" % patched)
+          PY
+
+      - name: Compile (armv7)
+        run: |
+          set -euo pipefail
+          mkdir -p obj
+          FLAGS=(-target armv7-apple-ios9.0.0 -arch armv7 -isysroot "$SDK"
+                 -fobjc-arc -fblocks -Os -g0 -Wall
+                 -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable)
+          for f in ios/*.m; do
+            base="$(basename "$f" .m)"
+            echo "CC $base"
+            clang "${FLAGS[@]}" -c "$f" -o "obj/$base.o"
+          done
+
+      - name: Link
+        run: |
+          set -euo pipefail
+          clang -target armv7-apple-ios9.0.0 -arch armv7 -isysroot "$SDK" \
+            -fuse-ld=lld \
+            -Wl,-platform_version,ios,9.0,9.3 \
+            -Wl,-undefined,dynamic_lookup \
+            -framework UIKit -framework Foundation -framework JavaScriptCore \
+            -framework CoreFoundation -framework AVFoundation -framework CoreText \
+            -lz \
+            -o YueduLite obj/*.o
+          file YueduLite || true
+
+      - name: Sign and package IPA
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/ldid \
+            https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64
+          chmod +x /tmp/ldid
+
+          rm -rf Payload
+          APP=Payload/YueduLite.app
+          mkdir -p "$APP"
+          cp YueduLite "$APP/YueduLite"
+          cp ios/Resources/Info.plist "$APP/"
+          cp ios/Resources/*.js "$APP/"
+          cp ios/Resources/*.png "$APP/"
+          /tmp/ldid -Sios/entitlements.plist "$APP/YueduLite"
+          /tmp/ldid -e "$APP/YueduLite" | head -20 || true
+
+          rm -f YueduLite.ipa
+          zip -qry YueduLite.ipa Payload
+          ls -l YueduLite.ipa
+          sha256sum YueduLite.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YueduLite-ipa
+          path: YueduLite.ipa
+          if-no-files-found: error
+
+      - name: Publish IPA to repo dist/ (API download path)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          B64="$(base64 -w0 YueduLite.ipa)"
+          SHA="$(sha256sum YueduLite.ipa | cut -d' ' -f1)"
+          SIZE="$(stat -c%s YueduLite.ipa)"
+          python3 - "$B64" "$SHA" "$SIZE" <<'PY'
+          import json, os, sys, urllib.request
+          b64, sha, size = sys.argv[1], sys.argv[2], sys.argv[3]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          api = f"https://api.github.com/repos/{repo}/contents/dist"
+          hdr = {"Authorization": f"Bearer {token}", "User-Agent": "ci",
+                 "Accept": "application/vnd.github+json"}
+
+          def put(path, content, message):
+              body = json.dumps({"message": message, "content": content, "branch": "main"}).encode()
+              req = urllib.request.Request(api + "/" + path, data=body, method="PUT", headers=hdr)
+              try:
+                  urllib.request.urlopen(req, timeout=120)
+              except urllib.error.HTTPError as e:
+                  # 已存在则取 sha 后更新
+                  if e.code != 422:
+                      raise
+                  req2 = urllib.request.Request(api + "/" + path, headers=hdr)
+                  old = json.load(urllib.request.urlopen(req2, timeout=60))["sha"]
+                  body = json.dumps({"message": message, "content": content,
+                                     "branch": "main", "sha": old}).encode()
+                  req = urllib.request.Request(api + "/" + path, data=body, method="PUT", headers=hdr)
+                  urllib.request.urlopen(req, timeout=120)
+
+          meta = f'{{"sha256":"{sha}","size":{size},"run":"{os.environ.get("GITHUB_RUN_NUMBER","")}"}}\n'
+          put("YueduLite.ipa", b64, "CI: update dist/YueduLite.ipa")
+          put("version.json", __import__("base64").b64encode(meta.encode()).decode(),
+              "CI: update dist/version.json")
+          print("published", size, "bytes", sha)
+          PY
