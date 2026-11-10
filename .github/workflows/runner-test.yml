@@ -10,7 +10,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "ubuntu ok" && uname -a
-  macos:
+  macos-15:
     runs-on: macos-15
     steps:
-      - run: echo "macos ok" && sw_vers
+      - run: echo "macos-15 ok" && sw_vers
+  macos-14:
+    runs-on: macos-14
+    steps:
+      - run: echo "macos-14 ok" && sw_vers
+  macos-13:
+    runs-on: macos-13
+    steps:
+      - run: echo "macos-13 ok" && sw_vers
+  macos-latest:
+    runs-on: macos-latest
+    steps:
+      - run: echo "macos-latest ok" && sw_vers
