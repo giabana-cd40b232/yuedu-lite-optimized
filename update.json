@@ -1,0 +1,11 @@
+{
+  "version": "1.5",
+  "build": 30,
+  "tag": "v1.5",
+  "name": "YueduLite",
+  "minOS": "9.0",
+  "ipa": "https://gitee.com/jyz2574461147/yuedu-lite/releases/download/v1.5/YueduLite.ipa",
+  "github": "https://github.com/Daniel123999/yuedu-lite/releases/download/v1.5/YueduLite.ipa",
+  "sha256": "468BF3939F83B7953356155B6DDBD8AA8CAA1F14C46B3812C217BCBEA5172E8E",
+  "notes": "Build 30\n- 优化统计兼容性\n- 修复打开书阻塞问题\n- 防止重复打开阅读窗口\n- 自动发布流程优化"
+}

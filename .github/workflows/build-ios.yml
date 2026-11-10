@@ -1,0 +1,119 @@
+name: Build iPhone 4S IPA
+
+# 在 GitHub 的 macOS 机器上装 theos + iPhoneOS9.3 SDK，
+# 交叉编译 armv7 的 YueduLite.app，并打成未签名 IPA。
+# 下载 Artifact 后，用 Filza + AppSync Unified 安装到越狱的 iPhone 4S。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      THEOS: ${{ github.workspace }}/theos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install ldid xz
+
+      - name: Clone theos
+        run: |
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+
+      - name: Download iPhoneOS9.3 SDK (armv7)
+        run: |
+          rm -rf "$THEOS/sdks"
+          git clone --filter=blob:none --no-checkout --depth 1 \
+            https://github.com/theos/sdks.git "$THEOS/sdks"
+          cd "$THEOS/sdks"
+          git sparse-checkout init --cone
+          git sparse-checkout set iPhoneOS9.3.sdk
+          git checkout
+          ls -1 "$THEOS/sdks"
+
+      - name: Patch iPhoneOS9.3 SDK for modern clang/ld
+        run: |
+          python3 - <<'PY'
+          import os, re, shutil
+
+          sdk = os.path.join(os.environ["THEOS"], "sdks", "iPhoneOS9.3.sdk")
+
+          # 1) PrivateFrameworks 里的 JavaScriptCore.framework 只有 .tbd 没有 Headers，
+          #    会把同名公共框架的头文件查找挡掉。
+          jsc = os.path.join(sdk, "System/Library/PrivateFrameworks/JavaScriptCore.framework")
+          if os.path.isdir(jsc):
+              shutil.rmtree(jsc)
+              print("removed private JavaScriptCore.framework")
+
+          # 2) 新版 ld 用 archs 列表推断 tbd 的平台，带 i386/x86_64 会被判成模拟器库，
+          #    导致所有符号被忽略。去掉模拟器架构（只改顶层 archs 行）。
+          patched = 0
+          arch_re = re.compile(r"^archs:\s*\[([^\]]*)\]", re.M)
+
+          def fix_archs(m):
+              archs = [a.strip() for a in m.group(1).split(",") if a.strip()]
+              keep = [a for a in archs if a not in ("i386", "x86_64")]
+              return "archs:                 [ " + ", ".join(keep) + " ]"
+
+          for dirpath, _, files in os.walk(sdk):
+              for name in files:
+                  if not (name.endswith(".tbd") or name.endswith(".dylib")):
+                      continue
+                  path = os.path.join(dirpath, name)
+                  try:
+                      with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                          text = f.read()
+                  except OSError:
+                      continue
+                  if not text.startswith("---"):
+                      continue
+                  # 3) libSystem 的桩 re-export 了 SDK 里不存在的 liblaunch.dylib
+                  new = text.replace("/usr/lib/system/liblaunch.dylib, ", "")
+                  new = arch_re.sub(fix_archs, new, count=1)
+                  if new != text:
+                      with open(path, "w", encoding="utf-8") as f:
+                          f.write(new)
+                      patched += 1
+
+          print("patched %d stub files" % patched)
+          PY
+          grep -c liblaunch "$THEOS/sdks/iPhoneOS9.3.sdk/usr/lib/libSystem.tbd" || true
+          head -4 "$THEOS/sdks/iPhoneOS9.3.sdk/usr/lib/libSystem.B.tbd"
+
+      - name: Build
+        working-directory: ios
+        run: |
+          make clean || true
+          make TARGET=iphone:clang:9.3:9.0 ARCHS=armv7
+
+      - name: Inspect binary
+        working-directory: ios
+        run: |
+          BIN="$(find .theos -type f -name YueduLite -perm -u+x | head -1)"
+          echo "binary: $BIN"
+          file "$BIN"
+          echo "--- linked libraries"
+          otool -L "$BIN"
+          echo "--- undefined symbol count"
+          nm -u "$BIN" | wc -l
+
+      - name: Package unsigned IPA
+        working-directory: ios
+        run: |
+          chmod +x make_ipa.sh
+          ./make_ipa.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: YueduLite-ipa
+          path: ios/YueduLite.ipa
+          if-no-files-found: error

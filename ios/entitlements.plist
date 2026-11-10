@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 越狱工具类应用：以平台身份运行，允许调用安装接口和 spawn 安装器 -->
+    <key>platform-application</key>
+    <true/>
+    <key>com.apple.private.security.no-container</key>
+    <true/>
+    <key>com.apple.private.security.no-sandbox</key>
+    <true/>
+    <key>com.apple.private.mobileinstall.allowedSPI</key>
+    <array>
+        <string>Install</string>
+        <string>Upgrade</string>
+        <string>Uninstall</string>
+        <string>Lookup</string>
+        <string>Browse</string>
+    </array>
+    <key>get-task-allow</key>
+    <true/>
+</dict>
+</plist>
