@@ -6,8 +6,10 @@ name: Build iPhone 4S IPA
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
+  # 该账号暂无 macOS runner 配额，push 自动构建会排队 15 分钟后被取消；
+  # Linux 交叉编译见 build-ios-linux.yml。需要 macOS 构建时手动触发。
+  # push:
+  #   branches: [main, master]
 
 jobs:
   build:
