@@ -92,7 +92,9 @@ extern NSString *const YLThemeDidChangeNotification;
 - (UIColor *)tintColorForStyle:(NSInteger)style;
 - (UIColor *)tintForegroundForStyle:(NSInteger)style;
 
-- (UIFont *)uiFontOfSize:(CGFloat)size weight:(UIFontWeight)weight;
+// iOS 9.3 SDK 没有 UIFontWeight 这个 typedef（iOS 11 才有），
+// 只有 UIFontWeightRegular 等 CGFloat 常量，因此这里用 CGFloat。
+- (UIFont *)uiFontOfSize:(CGFloat)size weight:(CGFloat)weight;
 - (UIFont *)titleFontOfSize:(CGFloat)size;
 
 /** 统一卡片观感：圆角 + 背景 + 极细边框（不使用阴影，照顾 4S 性能）。 */
