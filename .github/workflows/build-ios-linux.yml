@@ -1,9 +1,6 @@
 name: Build iPhone 4S IPA (Linux)
 
-# 在 ubuntu runner 上用 clang + ld64.lld 交叉编译 armv7，
-# 读取 theos/sdks 的 iPhoneOS9.3.sdk，输出未签名 IPA。
-# 适用于 macOS runner 不可用的账号。
-
+# 鍦?ubuntu runner 涓婄敤 clang + ld64.lld 浜ゅ弶缂栬瘧 armv7锛?# 璇诲彇 theos/sdks 鐨?iPhoneOS9.3.sdk锛岃緭鍑烘湭绛惧悕 IPA銆?# 閫傜敤浜?macOS runner 涓嶅彲鐢ㄧ殑璐﹀彿銆?
 on:
   workflow_dispatch:
   push:
@@ -11,6 +8,10 @@ on:
     paths:
       - "ios/**"
       - ".github/workflows/build-ios-linux.yml"
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -51,13 +52,12 @@ jobs:
 
           sdk = os.environ["SDK"]
 
-          # 私有 JavaScriptCore.framework 只有 .tbd 没有 Headers，会挡住公共框架头文件
-          jsc = os.path.join(sdk, "System/Library/PrivateFrameworks/JavaScriptCore.framework")
+          # 绉佹湁 JavaScriptCore.framework 鍙湁 .tbd 娌℃湁 Headers锛屼細鎸′綇鍏叡妗嗘灦澶存枃浠?          jsc = os.path.join(sdk, "System/Library/PrivateFrameworks/JavaScriptCore.framework")
           if os.path.isdir(jsc):
               shutil.rmtree(jsc)
               print("removed private JavaScriptCore.framework")
 
-          # 新版 ld 用 archs 推断平台，i386/x86_64 会被当成模拟器库
+          # 鏂扮増 ld 鐢?archs 鎺ㄦ柇骞冲彴锛宨386/x86_64 浼氳褰撴垚妯℃嫙鍣ㄥ簱
           patched = 0
           arch_re = re.compile(r"^archs:\s*\[([^\]]*)\]", re.M)
 
@@ -166,8 +166,7 @@ jobs:
               try:
                   urllib.request.urlopen(req, timeout=120)
               except urllib.error.HTTPError as e:
-                  # 已存在则取 sha 后更新
-                  if e.code != 422:
+                  # 宸插瓨鍦ㄥ垯鍙?sha 鍚庢洿鏂?                  if e.code != 422:
                       raise
                   req2 = urllib.request.Request(api + "/" + path, headers=hdr)
                   old = json.load(urllib.request.urlopen(req2, timeout=60))["sha"]
