@@ -420,7 +420,7 @@ static NSString *const kYLChapterTitleWeightKey = @"yl.theme.chapterTitleWeight"
     return [self accentColor];
 }
 
-- (UIFont *)uiFontOfSize:(CGFloat)size weight:(UIFontWeight)weight {
+- (UIFont *)uiFontOfSize:(CGFloat)size weight:(CGFloat)weight {
     if ([UIFont respondsToSelector:@selector(systemFontOfSize:weight:)]) {
         return [UIFont systemFontOfSize:size weight:weight];
     }
